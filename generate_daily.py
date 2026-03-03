@@ -144,43 +144,12 @@ columns = [
 
 df = pd.DataFrame(records, columns=columns)
 
-# 🔥 FIX TIMESTAMP FOR DATABRICKS (convert to microseconds)
-df["request_date"] = pd.to_datetime(df["request_date"]).dt.floor("us")
+# 🔥 CONVERT request_date sang STRING
+df["request_date"] = pd.to_datetime(df["request_date"]) \
+                        .dt.strftime("%Y-%m-%d %H:%M:%S")
 
 file_name = f"transactions_{target_date}.parquet"
 local_path = f"/tmp/{file_name}"
-
-# ======================================================
-# FORCE PYARROW SCHEMA (NO NANOS)
-# ======================================================
-
-import pyarrow as pa
-import pyarrow.parquet as pq
-
-df["request_date"] = pd.to_datetime(df["request_date"])
-
-schema = pa.schema([
-    ("request_id", pa.string()),
-    ("msisdn", pa.string()),
-    ("service_code", pa.string()),
-    ("product_code", pa.string()),
-    ("process_code", pa.string()),
-    ("trans_amount", pa.int32()),
-    ("trans_fee", pa.int32()),
-    ("error_code", pa.string()),
-    ("request_date", pa.timestamp("us")),  # 🔥 FORCE MICROS
-    ("partition_date", pa.int32()),
-    ("retry_sequence", pa.int32()),
-    ("is_retry", pa.bool_())
-])
-
-table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
-
-pq.write_table(
-    table,
-    local_path,
-    use_deprecated_int96_timestamps=False
-)
 
 print("File created:", local_path)
 
@@ -209,4 +178,5 @@ s3.upload_file(local_path, S3_BUCKET, s3_key)
 
 
 print("Upload successful:", s3_key)
+
 
