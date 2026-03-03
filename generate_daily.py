@@ -144,6 +144,9 @@ columns = [
 
 df = pd.DataFrame(records, columns=columns)
 
+# 🔥 FIX TIMESTAMP FOR DATABRICKS (convert to microseconds)
+df["request_date"] = pd.to_datetime(df["request_date"]).dt.floor("us")
+
 file_name = f"transactions_{target_date}.parquet"
 local_path = f"/tmp/{file_name}"
 
@@ -173,5 +176,6 @@ partition_value = target_date.strftime("%Y%m%d")
 s3_key = f"{S3_PREFIX}/partition_date={partition_value}/{file_name}"
 
 s3.upload_file(local_path, S3_BUCKET, s3_key)
+
 
 print("Upload successful:", s3_key)
