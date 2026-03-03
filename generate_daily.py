@@ -106,7 +106,7 @@ while len(records) < DAILY_VOLUME:
         trans_amount,
         trans_fee,
         first_error,
-        request_date,
+        request_date.strftime("%Y-%m-%d %H:%M:%S"),  # 🔥 convert tại đây
         int(request_date.strftime("%Y%m%d")),
         0,
         False
@@ -125,7 +125,7 @@ while len(records) < DAILY_VOLUME:
             trans_amount,
             trans_fee,
             "00" if r == retry_count else first_error,
-            retry_time,
+            retry_time.strftime("%Y-%m-%d %H:%M:%S"),  # 🔥 convert tại đây
             int(retry_time.strftime("%Y%m%d")),
             r,
             True
@@ -178,5 +178,6 @@ s3.upload_file(local_path, S3_BUCKET, s3_key)
 
 
 print("Upload successful:", s3_key)
+
 
 
