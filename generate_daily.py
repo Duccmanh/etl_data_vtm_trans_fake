@@ -136,6 +136,9 @@ local_path = f"/tmp/{file_name}"
 
 pq.write_table(table, local_path)
 
+check_table = pq.read_table(local_path)
+print(check_table.schema)
+
 print("Parquet file created:", local_path)
 
 # ======================================================
@@ -155,3 +158,4 @@ s3_key = f"{S3_PREFIX}/partition_date={partition_value}/{file_name}"
 s3.upload_file(local_path, S3_BUCKET, s3_key)
 
 print("Upload successful:", s3_key)
+
