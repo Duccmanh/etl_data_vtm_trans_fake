@@ -145,11 +145,12 @@ columns = [
 df = pd.DataFrame(records, columns=columns)
 
 # 🔥 CONVERT request_date sang STRING
-df["request_date"] = pd.to_datetime(df["request_date"]) \
-                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+df["request_date"] = df["request_date"].astype(str)
 
 file_name = f"transactions_{target_date}.parquet"
 local_path = f"/tmp/{file_name}"
+
+df.to_parquet(local_path, index=False)
 
 print("File created:", local_path)
 
@@ -178,6 +179,7 @@ s3.upload_file(local_path, S3_BUCKET, s3_key)
 
 
 print("Upload successful:", s3_key)
+
 
 
 
