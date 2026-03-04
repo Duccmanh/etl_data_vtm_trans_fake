@@ -1,30 +1,32 @@
-name: Viettel Money Daily Generator
+name: Generate Fake Data
 
 on:
-  schedule:
-    # 05:00 giờ Việt Nam = 22:00 UTC (ngày hôm trước)
-    - cron: '0 22 * * *'
   workflow_dispatch:
 
 jobs:
-  generate-and-upload:
+
+  generate:
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: 3.10
 
       - name: Install dependencies
         run: |
-          pip install pandas boto3 pyarrow
+          pip install -r requirements.txt
 
-      - name: Run data generation script
-        run: python generate_daily.py
+      - name: Run generator
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AWS_DEFAULT_REGION: ap-southeast-2
+        run: |
+          python generate_fake_data_fast.py
