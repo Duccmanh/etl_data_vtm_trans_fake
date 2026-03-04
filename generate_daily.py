@@ -1,161 +1,202 @@
-import os
 import random
 import pandas as pd
-from datetime import datetime, timedelta
-from collections import defaultdict
+import numpy as np
+from datetime import datetime, timedelta, date
 import boto3
-import pyarrow as pa
-import pyarrow.parquet as pq
+import io
 
-# ======================================================
+# =============================
 # CONFIG
-# ======================================================
+# =============================
 
-DAILY_VOLUME = 100000
-NUM_USERS = 20000
-CLUSTER_USERS = 1500
+INITIAL_USERS = 30000
+NEW_USER_RATE = 0.01
+INACTIVE_RATE = 0.003
+
+TRANS_MIN = 30000
+TRANS_MAX = 35000
 
 S3_BUCKET = "vtm-data-fake"
-S3_PREFIX = "stogare/transaction/daily"
+S3_PREFIX_USER = "storage/user"
+S3_PREFIX_TRANS = "storage/transaction"
+
 AWS_REGION = "ap-southeast-2"
 
-AUTO_PAY_PRODUCTS = ["BILL_PAY", "TOPUP", "INSURANCE", "LOAN", "SAVING"]
+START_DATE = date(2025,1,1)
+END_DATE = date(2026,3,3)
+
+AUTO_PAY_PRODUCTS = ["BILL_PAY","TOPUP","INSURANCE","LOAN","SAVING"]
 
 product_services = {
-    "TRANSFER": ["TRF_PHONE", "TRF_BANK", "TRF_CASH"],
-    "BILL_PAY": ["BILL_ELECTRIC", "BILL_WATER", "BILL_INTERNET"],
-    "TOPUP": ["TOPUP_PHONE", "TOPUP_DATA", "TOPUP_GAME"],
-    "TRAVEL": ["BOOK_FLIGHT", "BOOK_TRAIN", "BOOK_HOTEL"],
-    "SAVING": ["SAVE_ONLINE", "SAVE_AUTO", "SAVE_PROMO"],
-    "LOAN": ["LOAN_SHORT", "LOAN_LONG", "LOAN_INSTANT"],
-    "INSURANCE": ["INSUR_HEALTH", "INSUR_VEHICLE", "INSUR_PERSONAL"],
-    "QR_PAY": ["QR_STORE", "QR_MARKET", "QR_CAFE"]
+    "TRANSFER": ["TRF_PHONE","TRF_BANK","TRF_CASH"],
+    "BILL_PAY": ["BILL_ELECTRIC","BILL_WATER","BILL_INTERNET"],
+    "TOPUP": ["TOPUP_PHONE","TOPUP_DATA","TOPUP_GAME"],
+    "TRAVEL": ["BOOK_FLIGHT","BOOK_TRAIN","BOOK_HOTEL"],
+    "SAVING": ["SAVE_ONLINE","SAVE_AUTO","SAVE_PROMO"],
+    "LOAN": ["LOAN_SHORT","LOAN_LONG","LOAN_INSTANT"],
+    "INSURANCE": ["INSUR_HEALTH","INSUR_VEHICLE","INSUR_PERSONAL"],
+    "QR_PAY": ["QR_STORE","QR_MARKET","QR_CAFE"]
 }
 
-# ======================================================
-# DATE LOGIC
-# ======================================================
+products = list(product_services.keys())
 
-now_utc = datetime.utcnow()
-now_vn = now_utc + timedelta(hours=7)
-target_date = now_vn.date() - timedelta(days=1)
+s3 = boto3.client("s3",region_name=AWS_REGION)
 
-start_time = datetime.combine(target_date, datetime.min.time())
-print(f"Generating data for date: {target_date}")
+# =============================
+# INITIAL USER TABLE
+# =============================
 
-# ======================================================
-# USER SETUP
-# ======================================================
+msisdn_list = [f"849{random.randint(10000000,99999999)}" for _ in range(INITIAL_USERS)]
 
-cluster_user_ids = set(random.sample(range(NUM_USERS), CLUSTER_USERS))
-users = [f"849{random.randint(10000000, 99999999)}" for _ in range(NUM_USERS)]
-auto_pay_tracker = defaultdict(set)
+user_df = pd.DataFrame({
+    "msisdn":msisdn_list,
+    "register_date":[START_DATE]*INITIAL_USERS,
+    "status":["active"]*INITIAL_USERS,
+    "inactive_date":[None]*INITIAL_USERS
+})
 
-def random_time_within_day():
-    seconds = random.randint(0, 86399)
-    return start_time + timedelta(seconds=seconds)
+# =============================
+# LOOP DATE
+# =============================
 
-records = []
+current_date = START_DATE
 
-# ======================================================
-# DATA GENERATION
-# ======================================================
+while current_date <= END_DATE:
 
-while len(records) < DAILY_VOLUME:
+    partition_date = current_date.strftime("%Y%m%d")
 
-    user_index = random.randint(0, NUM_USERS - 1)
-    msisdn = users[user_index]
+    print("Processing",partition_date)
 
-    product_code = random.choice(list(product_services.keys()))
-    service_code = random.choice(product_services[product_code])
+    # =============================
+    # USER UPDATE
+    # =============================
 
-    request_date_dt = random_time_within_day()
-    request_date = request_date_dt.strftime("%Y-%m-%d %H:%M:%S")  # STRING 100%
+    active_users = user_df[user_df.status=="active"].msisdn.values
 
-    month_key = f"{request_date_dt.year}-{request_date_dt.month}"
+    new_user_count = int(len(active_users)*NEW_USER_RATE)
 
-    process_code = "300001"
-    if product_code in AUTO_PAY_PRODUCTS:
-        if month_key not in auto_pay_tracker[msisdn] and random.random() < 0.3:
-            process_code = "750001"
-            auto_pay_tracker[msisdn].add(month_key)
+    new_users = [f"849{random.randint(10000000,99999999)}" for _ in range(new_user_count)]
 
-    trans_amount = random.randint(10000, 600000)
-    trans_fee = int(trans_amount * random.uniform(0.01, 0.05))
+    new_df = pd.DataFrame({
+        "msisdn":new_users,
+        "register_date":[current_date]*new_user_count,
+        "status":["active"]*new_user_count,
+        "inactive_date":[None]*new_user_count
+    })
 
-    first_error = random.choices(["00", "01", "02", "05"], weights=[92,4,2,2])[0]
+    user_df = pd.concat([user_df,new_df],ignore_index=True)
 
-    base_id = request_date_dt.strftime("%Y%m%d") + f"{random.randint(0,999999):06d}"
+    inactive_count = int(len(active_users)*INACTIVE_RATE)
 
-    records.append([
-        base_id, msisdn, service_code, product_code,
-        process_code, trans_amount, trans_fee,
-        first_error, request_date,
-        int(request_date_dt.strftime("%Y%m%d")),
-        0, False
-    ])
+    if inactive_count > 0:
 
-# ======================================================
-# DATAFRAME
-# ======================================================
+        inactive_sample = np.random.choice(active_users,inactive_count,replace=False)
 
-columns = [
-    "request_id","msisdn","service_code","product_code",
-    "process_code","trans_amount","trans_fee",
-    "error_code","request_date","partition_date",
-    "retry_sequence","is_retry"
-]
+        user_df.loc[user_df.msisdn.isin(inactive_sample),"status"]="inactive"
+        user_df.loc[user_df.msisdn.isin(inactive_sample),"inactive_date"]=current_date
 
-df = pd.DataFrame(records, columns=columns)
+    active_users = user_df[user_df.status=="active"].msisdn.values
 
-print(df.dtypes)  # DEBUG
+    # =============================
+    # USER CLUSTER
+    # =============================
 
-# ======================================================
-# WRITE PARQUET WITH FIXED SCHEMA (NO TIMESTAMP)
-# ======================================================
+    np.random.shuffle(active_users)
 
-schema = pa.schema([
-    ("request_id", pa.string()),
-    ("msisdn", pa.string()),
-    ("service_code", pa.string()),
-    ("product_code", pa.string()),
-    ("process_code", pa.string()),
-    ("trans_amount", pa.int64()),
-    ("trans_fee", pa.int64()),
-    ("error_code", pa.string()),
-    ("request_date", pa.string()),   # 🔥 FORCE STRING
-    ("partition_date", pa.int64()),
-    ("retry_sequence", pa.int64()),
-    ("is_retry", pa.bool_())
-])
+    n=len(active_users)
 
-table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+    power_users=active_users[:int(n*0.05)]
+    normal_users=active_users[int(n*0.05):int(n*0.25)]
+    low_users=active_users[int(n*0.25):]
 
-file_name = f"transactions_{target_date}.parquet"
-local_path = f"/tmp/{file_name}"
+    # =============================
+    # TRANSACTION GENERATION
+    # =============================
 
-pq.write_table(table, local_path)
+    trans_volume = random.randint(TRANS_MIN,TRANS_MAX)
 
-check_table = pq.read_table(local_path)
-print(check_table.schema)
+    users_sample = np.random.choice(
+        np.concatenate([power_users,normal_users,low_users]),
+        trans_volume
+    )
 
-print("Parquet file created:", local_path)
+    product_sample = np.random.choice(products,trans_volume)
 
-# ======================================================
-# UPLOAD TO S3
-# ======================================================
+    service_sample = [
+        random.choice(product_services[p]) for p in product_sample
+    ]
 
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-    region_name=AWS_REGION
-)
+    amount = np.random.randint(10000,600000,trans_volume)
 
-partition_value = target_date.strftime("%Y%m%d")
-s3_key = f"{S3_PREFIX}/partition_date={partition_value}/{file_name}"
+    fee = (amount*np.random.uniform(0.01,0.05,trans_volume)).astype(int)
 
-s3.upload_file(local_path, S3_BUCKET, s3_key)
+    error_code = np.random.choice(
+        ["00","01","02","05"],
+        trans_volume,
+        p=[0.92,0.04,0.02,0.02]
+    )
 
-print("Upload successful:", s3_key)
+    # =============================
+    # TIME GENERATION
+    # =============================
 
+    start_day=datetime.combine(current_date,datetime.min.time())
+
+    seconds=np.random.randint(0,86400,trans_volume)
+
+    times=[start_day+timedelta(seconds=int(s)) for s in seconds]
+
+    request_date=[t.strftime("%Y-%m-%d %H:%M:%S") for t in times]
+
+    request_id=[t.strftime("%Y%m%d")+f"{random.randint(0,999999):06d}" for t in times]
+
+    process_code=["300001"]*trans_volume
+
+    trans_df=pd.DataFrame({
+        "request_id":request_id,
+        "msisdn":users_sample,
+        "service_code":service_sample,
+        "product_code":product_sample,
+        "process_code":process_code,
+        "trans_amount":amount,
+        "trans_fee":fee,
+        "error_code":error_code,
+        "request_date":request_date,
+        "partition_date":[partition_date]*trans_volume
+    })
+
+    # =============================
+    # UPLOAD USER
+    # =============================
+
+    user_buffer=io.BytesIO()
+    user_df.to_parquet(user_buffer,index=False)
+    user_buffer.seek(0)
+
+    user_key=f"{S3_PREFIX_USER}/partition_date={partition_date}/user_{partition_date}.parquet"
+
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=user_key,
+        Body=user_buffer.getvalue()
+    )
+
+    # =============================
+    # UPLOAD TRANSACTION
+    # =============================
+
+    trans_buffer=io.BytesIO()
+    trans_df.to_parquet(trans_buffer,index=False)
+    trans_buffer.seek(0)
+
+    trans_key=f"{S3_PREFIX_TRANS}/partition_date={partition_date}/transaction_{partition_date}.parquet"
+
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=trans_key,
+        Body=trans_buffer.getvalue()
+    )
+
+    current_date += timedelta(days=1)
+
+print("DONE")
