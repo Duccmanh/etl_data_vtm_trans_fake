@@ -29,4 +29,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
           AWS_DEFAULT_REGION: ap-southeast-2
         run: |
-          python generate_fake_data_fast.py
+          python generate_daily.py
