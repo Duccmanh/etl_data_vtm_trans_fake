@@ -1,6 +1,10 @@
-name: Generate Fake Data
+name: Generate Daily Data
 
 on:
+
+  schedule:
+    - cron: "0 22 * * *"
+
   workflow_dispatch:
 
 jobs:
