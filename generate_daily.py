@@ -22,8 +22,8 @@ S3_PREFIX_TRANS = "storage/transaction"
 
 AWS_REGION = "ap-southeast-2"
 
-START_DATE = date(2025,1,1)
-END_DATE = date(2026,3,3)
+START_DATE = date(2025,10,28)
+END_DATE = date(2026,3,4)
 
 AUTO_PAY_PRODUCTS = ["BILL_PAY","TOPUP","INSURANCE","LOAN","SAVING"]
 
@@ -43,17 +43,35 @@ products = list(product_services.keys())
 s3 = boto3.client("s3",region_name=AWS_REGION)
 
 # =============================
-# INITIAL USER TABLE
+# LOAD USER SNAPSHOT FROM S3
 # =============================
 
-msisdn_list = [f"849{random.randint(10000000,99999999)}" for _ in range(INITIAL_USERS)]
+def load_user_snapshot(partition_date):
 
-user_df = pd.DataFrame({
-    "msisdn":msisdn_list,
-    "register_date":[START_DATE]*INITIAL_USERS,
-    "status":["active"]*INITIAL_USERS,
-    "inactive_date":[None]*INITIAL_USERS
-})
+    key = f"{S3_PREFIX_USER}/partition_date={partition_date}/user_{partition_date}.parquet"
+
+    print("Loading snapshot:", key)
+
+    obj = s3.get_object(
+        Bucket=S3_BUCKET,
+        Key=key
+    )
+
+    df = pd.read_parquet(obj["Body"])
+
+    return df
+
+# =============================
+# LOAD PREVIOUS SNAPSHOT
+# =============================
+
+prev_partition = (START_DATE - timedelta(days=1)).strftime("%Y%m%d")
+
+user_df = load_user_snapshot(prev_partition)
+
+print("Loaded users:", len(user_df))
+
+print("Active users:", (user_df.status=="active").sum())
 
 # =============================
 # LOOP DATE
@@ -71,7 +89,7 @@ while current_date <= END_DATE:
     # USER UPDATE
     # =============================
 
-    active_users = user_df[user_df.status=="active"].msisdn.values
+    active_users = user_df[user_df.status=="active"].msisdn.to_numpy()
 
     new_user_count = int(len(active_users)*NEW_USER_RATE)
 
@@ -95,7 +113,7 @@ while current_date <= END_DATE:
         user_df.loc[user_df.msisdn.isin(inactive_sample),"status"]="inactive"
         user_df.loc[user_df.msisdn.isin(inactive_sample),"inactive_date"]=current_date
 
-    active_users = user_df[user_df.status=="active"].msisdn.values
+    active_users = user_df[user_df.status=="active"].msisdn.to_numpy()
 
     # =============================
     # USER CLUSTER
@@ -115,10 +133,7 @@ while current_date <= END_DATE:
 
     trans_volume = random.randint(TRANS_MIN,TRANS_MAX)
 
-    users_sample = np.random.choice(
-        np.concatenate([power_users,normal_users,low_users]),
-        trans_volume
-    )
+    users_sample = np.random.choice(active_users, trans_volume)
 
     product_sample = np.random.choice(products,trans_volume)
 
@@ -200,3 +215,4 @@ while current_date <= END_DATE:
     current_date += timedelta(days=1)
 
 print("DONE")
+
