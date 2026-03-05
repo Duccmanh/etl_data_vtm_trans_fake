@@ -57,7 +57,9 @@ def load_user_snapshot(partition_date):
         Key=key
     )
 
-    df = pd.read_parquet(obj["Body"])
+    buffer = io.BytesIO(obj["Body"].read())
+
+    df = pd.read_parquet(buffer)
 
     return df
 
@@ -215,4 +217,5 @@ while current_date <= END_DATE:
     current_date += timedelta(days=1)
 
 print("DONE")
+
 
